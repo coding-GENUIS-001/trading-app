@@ -232,5 +232,20 @@
   {"id":"GOOGL","type":"stock","tv":"NASDAQ:GOOGL","source":"tv"},
   {"id":"NVDA","type":"stock","tv":"NASDAQ:NVDA","source":"tv"},
   {"id":"META","type":"stock","tv":"NASDAQ:META","source":"tv"},
-  {"id":"JPM","type":"stock","tv":"NYSE:JPM","source":"tv"}
+  {"id":"JPM","type":"stock","tv":"NYSE:JPM","source":"tv"},
+  {"id":"NFLX","type":"stock","tv":"NASDAQ:NFLX","source":"tv"},
+  {"id":"BABA","type":"stock","tv":"NYSE:BABA","source":"tv"},
+  {"id":"ORCL","type":"stock","tv":"NYSE:ORCL","source":"tv"},
+  {"id":"SAP","type":"stock","tv":"NYSE:SAP","source":"tv"},
+  {"id":"BA","type":"stock","tv":"NYSE:BA","source":"tv"},
+  {"id":"V","type":"stock","tv":"NYSE:V","source":"tv"},
+  {"id":"MA","type":"stock","tv":"NYSE:MA","source":"tv"},
+  {"id":"HD","type":"stock","tv":"NYSE:HD","source":"tv"},
+  {"id":"DIS","type":"stock","tv":"NYSE:DIS","source":"tv"},
+  {"id":"NKE","type":"stock","tv":"NYSE:NKE","source":"tv"},
+  {"id":"PEP","type":"stock","tv":"NASDAQ:PEP","source":"tv"},
+  {"id":"KO","type":"stock","tv":"NYSE:KO","source":"tv"},
+  {"id":"BMY","type":"stock","tv":"NYSE:BMY","source":"tv"},
+  {"id":"CVX","type":"stock","tv":"NYSE:CVX","source":"tv"},
+  {"id":"XOM","type":"stock","tv":"NYSE:XOM","source":"tv"}
 ]

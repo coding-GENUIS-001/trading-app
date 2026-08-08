@@ -1,4 +1,7 @@
-// app.js - improved for 250 pairs: expose global Binance maps and exponential WS backoff
+// app.js - reliability patch for 250 pairs
+// - DEFAULT_CHUNK_SIZE lowered to 15
+// - polling fallback for symbols that don't receive WS updates
+// - health/status indicator improved
 
 let symbolCatalog = [];
 const state = {
@@ -8,11 +11,16 @@ const state = {
   binanceSockets: [],
   binanceSymbols: [],
   nonBinanceSymbols: [],
+  lastReceived: {}, // symbol -> timestamp
+  pollingActive: false,
 };
 
-const DEFAULT_CHUNK_SIZE = 20; // lowered further for reliability
+const DEFAULT_CHUNK_SIZE = 15; // lowered to maximize WS reliability
 const WS_RECONNECT_BASE = 1000; // ms
 const WS_RECONNECT_MAX = 30000; // ms
+const POLL_INTERVAL = 15000; // ms - how often we check for missing symbols
+const POLL_BATCH_SIZE = 10; // how many symbols to request per REST batch
+const MISSING_THRESHOLD = 12000; // ms - consider missing if no update in this many ms
 
 function $(sel){ return document.querySelector(sel); }
 function createEl(tag, cls){ const e = document.createElement(tag); if (cls) e.className = cls; return e; }
@@ -22,17 +30,20 @@ function ensureStatusBar(){
   if (!status){
     const header = document.querySelector('header') || document.body;
     status = createEl('div'); status.id = 'streamStatus';
-    status.style.fontSize = '13px'; status.style.color = '#9aa6b2'; status.style.marginTop = '6px';
+    status.style.fontSize = '13px';
+    status.style.color = '#9aa6b2';
+    status.style.marginTop = '6px';
     header.appendChild(status);
   }
   return status;
 }
 function updateStatusBar(requested, binanceCount, nonBinanceCount){
   const status = ensureStatusBar();
-  status.textContent = `Requested: ${requested} — Binance-streaming: ${binanceCount} — Chart-only: ${nonBinanceCount}`;
+  const open = (state.binanceSockets||[]).filter(s=> s.ws && s.ws.readyState===1).length;
+  status.textContent = `Requested: ${requested} — Binance-streaming: ${binanceCount} — Chart-only: ${nonBinanceCount} — WS open: ${open} — Polling: ${state.pollingActive ? 'on' : 'off'}`;
 }
 
-// rendering (unchanged behavior)
+// --- Render & UI (unchanged) ---
 function renderCatalog(){
   const grid = $("#ratesGrid"); if (!grid) return;
   grid.innerHTML = '';
@@ -98,6 +109,9 @@ function updateCardPrice(symbol, price, timestamp){
   card.tsEl.textContent = new Date(timestamp || Date.now()).toLocaleTimeString();
   state.lastUpdate = new Date(); const lu = $("#lastUpdate"); if (lu) lu.textContent = state.lastUpdate.toLocaleTimeString();
 
+  // update last-received timestamp for polling fallback
+  try{ state.lastReceived[symbol] = Date.now(); }catch(e){}
+
   if (prev > 0){ const c = card.container; c.classList.remove('price-flash-up','price-flash-down'); void c.offsetWidth; if (newPrice > prev) c.classList.add('price-flash-up'); else if (newPrice < prev) c.classList.add('price-flash-down'); setTimeout(()=>{ c.classList.remove('price-flash-up','price-flash-down'); }, 900); }
 }
 
@@ -124,15 +138,7 @@ async function fetchBinanceAllPrices(){ try{ const r = await fetch('https://api.
 
 function chunkArray(arr, size){ const out = []; for (let i=0;i<arr.length;i+=size) out.push(arr.slice(i,i+size)); return out; }
 
-function scheduleReconnect(wsObj){ // wsObj: { ws, chunk, url }
-  const ws = wsObj.ws;
-  ws._retries = (ws._retries || 0) + 1;
-  const backoff = Math.min(WS_RECONNECT_MAX, WS_RECONNECT_BASE * Math.pow(2, ws._retries));
-  const jitter = Math.floor(Math.random() * 1000);
-  const delay = backoff + jitter;
-  console.warn('scheduling reconnect in', delay, 'ms for chunk size', (wsObj.chunk||[]).length);
-  setTimeout(()=> connectBinanceChunk(wsObj.chunk, wsObj._idx, wsObj._retries || 0), delay);
-}
+function scheduleReconnect(wsObj){ const ws = wsObj.ws; ws._retries = (ws._retries || 0) + 1; const backoff = Math.min(WS_RECONNECT_MAX, WS_RECONNECT_BASE * Math.pow(2, ws._retries)); const jitter = Math.floor(Math.random() * 1000); const delay = backoff + jitter; console.warn('scheduling reconnect in', delay, 'ms for chunk size', (wsObj.chunk||[]).length); setTimeout(()=> connectBinanceChunk(wsObj.chunk, wsObj._idx, wsObj._retries || 0), delay); }
 
 function connectBinanceForChunks(chunks){ // close existing
   state.binanceSockets.forEach(s => { try{ s.ws.close(); }catch(e){} }); state.binanceSockets = [];
@@ -159,6 +165,37 @@ function connectBinanceForChunks(chunks){ // close existing
 
 function connectBinanceChunk(chunk, idx, retries = 0){ const streams = chunk.map(s => s.toLowerCase() + '@trade').join('/'); const url = `wss://stream.binance.com:9443/stream?streams=${streams}`; try{ const ws = new WebSocket(url); ws._chunk = chunk; ws._idx = idx; ws._url = url; ws._retries = retries || 0; ws.onopen = ()=> { console.log('Reconnected WS chunk', idx); ws._retries = 0; }; ws.onmessage = (evt)=>{ try{ const payload = JSON.parse(evt.data); const data = payload.data || payload; const s = (data.s || data.symbol || '').toUpperCase(); const price = parseFloat(data.p || data.price || data.c); const ts = data.E || data.T || Date.now(); if (s && !Number.isNaN(price)) updateCardPrice(s, price, ts); }catch(e){ console.warn('ws parse err', e); } }; ws.onclose = ()=> { console.warn('reconnect closed', idx); scheduleReconnect({ ws, chunk, url, _idx: idx }); }; ws.onerror = (e)=>{ console.warn('reconnect ws error', e); try{ ws.close(); }catch(e){} }; state.binanceSockets.push({ ws, chunk, url }); }catch(e){ console.warn('connectBinanceChunk failed', e); } }
 
+// Polling fallback: check for symbols missing updates and fetch prices in small batches
+let pollTimer = null;
+async function checkMissingSymbolsAndPoll(){
+  try{
+    const now = Date.now();
+    const missing = [];
+    (state.binanceSymbols || []).forEach(sym => {
+      const last = state.lastReceived[sym];
+      if (!last || (now - last) > MISSING_THRESHOLD) missing.push(sym);
+    });
+    if (missing.length === 0){ state.pollingActive = false; updateStatusBar(symbolCatalog.length, state.binanceSymbols.length, state.nonBinanceSymbols.length); return; }
+    state.pollingActive = true; updateStatusBar(symbolCatalog.length, state.binanceSymbols.length, state.nonBinanceSymbols.length);
+
+    // chunk missing into poll batches
+    for (let i=0;i<missing.length;i+=POLL_BATCH_SIZE){
+      const batch = missing.slice(i,i+POLL_BATCH_SIZE);
+      try{
+        const url = 'https://api.binance.com/api/v3/ticker/price?symbols=' + encodeURIComponent(JSON.stringify(batch));
+        const r = await fetch(url);
+        if (!r.ok) { console.warn('poll fetch failed', r.status); continue; }
+        const arr = await r.json();
+        arr.forEach(it => {
+          try{ const s = it.symbol; const p = parseFloat(it.price); if (s && !Number.isNaN(p)){ updateCardPrice(s, p, Date.now()); window.binancePriceMap = window.binancePriceMap || {}; window.binancePriceMap[s] = String(p); } }catch(e){}
+        });
+      }catch(e){ console.warn('poll batch err', e); }
+    }
+  }catch(e){ console.warn('poll loop err', e); }
+  // schedule next
+  pollTimer = setTimeout(checkMissingSymbolsAndPoll, POLL_INTERVAL);
+}
+
 // Entry
 async function startApp(){
   initUI(); loadWatchlist();
@@ -181,6 +218,10 @@ async function startApp(){
   const chunks = chunkArray(state.binanceSymbols, DEFAULT_CHUNK_SIZE);
   connectBinanceForChunks(chunks);
   updateStats();
+
+  // start polling fallback loop
+  if (pollTimer) clearTimeout(pollTimer);
+  pollTimer = setTimeout(checkMissingSymbolsAndPoll, POLL_INTERVAL);
 }
 
 document.addEventListener('DOMContentLoaded', startApp);

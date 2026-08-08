@@ -1,7 +1,9 @@
-// app.js - reliability patch for 250 pairs
-// - DEFAULT_CHUNK_SIZE lowered to 15
-// - polling fallback for symbols that don't receive WS updates
-// - health/status indicator improved
+// app.js - reliability hotfix for 250 pairs
+// Changes in this patch:
+// - Start polling fallback immediately after startup (no initial delay)
+// - Poll interval lowered to 8s and missing threshold to 5s for rapid recovery
+// - Poll batch size increased to 50 to reduce number of REST calls
+// - Kept DEFAULT_CHUNK_SIZE = 15
 
 let symbolCatalog = [];
 const state = {
@@ -18,9 +20,9 @@ const state = {
 const DEFAULT_CHUNK_SIZE = 15; // lowered to maximize WS reliability
 const WS_RECONNECT_BASE = 1000; // ms
 const WS_RECONNECT_MAX = 30000; // ms
-const POLL_INTERVAL = 15000; // ms - how often we check for missing symbols
-const POLL_BATCH_SIZE = 10; // how many symbols to request per REST batch
-const MISSING_THRESHOLD = 12000; // ms - consider missing if no update in this many ms
+const POLL_INTERVAL = 8000; // ms - how often we check for missing symbols (reduced)
+const POLL_BATCH_SIZE = 50; // how many symbols to request per REST batch (increased)
+const MISSING_THRESHOLD = 5000; // ms - consider missing if no update in this many ms (reduced)
 
 function $(sel){ return document.querySelector(sel); }
 function createEl(tag, cls){ const e = document.createElement(tag); if (cls) e.className = cls; return e; }
@@ -219,9 +221,9 @@ async function startApp(){
   connectBinanceForChunks(chunks);
   updateStats();
 
-  // start polling fallback loop
+  // start polling fallback loop immediately to fill gaps fast
   if (pollTimer) clearTimeout(pollTimer);
-  pollTimer = setTimeout(checkMissingSymbolsAndPoll, POLL_INTERVAL);
+  await checkMissingSymbolsAndPoll();
 }
 
 document.addEventListener('DOMContentLoaded', startApp);

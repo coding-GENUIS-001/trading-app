@@ -10,7 +10,7 @@ const state = {
   nonBinanceSymbols: [],
 };
 
-const DEFAULT_CHUNK_SIZE = 25; // slightly smaller for reliability
+const DEFAULT_CHUNK_SIZE = 20; // lowered further for reliability
 const WS_RECONNECT_BASE = 1000; // ms
 const WS_RECONNECT_MAX = 30000; // ms
 

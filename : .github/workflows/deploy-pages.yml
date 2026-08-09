@@ -1,0 +1,16 @@
+  - name: Setup Pages
+    id: pages
+    uses: actions/configure-pages@v3
+
+  - name: Upload artifact
+    uses: actions/upload-pages-artifact@v1
+    with:
+      path: ./
+
+  - name: Deploy to GitHub Pages
+    id: deploy
+    uses: actions/deploy-pages@v1
+
+  - name: Output Pages URL
+    run: |
+      echo "Pages should be available at: https://coding-GENUIS-001.github.io/trading-app/"

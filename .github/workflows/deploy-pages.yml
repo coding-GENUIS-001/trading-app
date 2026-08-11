@@ -1,0 +1,48 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches:
+      - feature/live-data
+  workflow_dispatch:
+
+jobs:
+  build_and_deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Pages
+        id: pages
+        uses: actions/configure-pages@v3
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v1
+        with:
+          path: ./
+
+      - name: Deploy to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v1
+
+      - name: Output Pages URL
+        run: |
+          echo "Pages should be available at: https://coding-GENUIS-001.github.io/trading-app/"
+
+  diagnose_pages:
+    needs: build_and_deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Quick remote health check
+        run: |
+          set -e
+          URL="https://coding-GENUIS-001.github.io/trading-app/"
+          echo "Checking ${URL}symbols.json"
+          status=$(curl -s -o /dev/null -w "%{http_code}" "${URL}symbols.json" || true)
+          echo "symbols.json status: $status"
+          if [ "$status" != "200" ]; then
+            echo "symbols.json not reachable (status $status). Check Pages deployment or assets.";
+            exit 1
+          fi
+          echo "Basic health check passed. If the site looks broken, open DevTools (Console/Network) and paste errors into the chat."
